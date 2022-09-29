@@ -9,3 +9,6 @@ Data processed from raw data
 
 ## remote sensing/plot/
 It contains the intermediate data exported from R, and uses plot_qinan.ipynb for drawing
+
+## about raw data
+Please contact me from email kangxinlai@ruc.edu if necessary.
