@@ -1,0 +1,364 @@
+---
+title: "qinan"
+author: "kxl"
+date: '2024-03-24'
+output: html_document
+---
+
+##### 秦安县数据分析：读取数据
+```{r}
+# ============== county-town-village ============================
+qinan = read.csv("./qinan2.csv", colClasses =c('numeric', 'character',rep('numeric', 9)))
+qinan_ = qinan[which(qinan$FIRST_Town%/%1000==620522),]
+qinan_$OID = 1:nrow(qinan_)
+qinan_$FIRST_Town = as.character(qinan_$FIRST_Town)
+qinan_$MEAN_TKXS = scale(qinan_$MEAN_TKXS)[,1]
+qinan_$MEAN_GDPDJ = scale(qinan_$MEAN_GDPDJ)[,1]
+qinan_$MEAN_Shape = scale(qinan_$MEAN_Shape)[,1]
+qinan_$MEAN_Sha_1 = scale(qinan_$MEAN_Sha_1)[,1]
+qinan_$MEAN_area_ = scale(qinan_$MEAN_area_)[,1]
+mean_TKXS = mean(qinan_$MEAN_TKXS)
+mean_GDPDJ = mean(qinan_$MEAN_GDPDJ)
+mean_Shape_Leng = mean(qinan_$MEAN_Shape)
+mean_Shape_Area = mean(qinan_$MEAN_Sha_1)
+mean_Area_len = mean(qinan_$MEAN_area_)
+SUM_TBDLMJ_real = sum(qinan_$SUM_TBDLMJ)
+```
+
+
+##### 秦安县数据分析：处理数据
+```{r}
+library('runjags')
+runjags.options(force.summary=TRUE)
+set.seed(0)
+
+FID = as.vector(unlist(qinan_["OID"]))
+QSDWDM = as.vector(unlist(qinan_["QSDWDM"]))
+TKXS = as.vector(unlist(qinan_["MEAN_TKXS"]))
+TBDLMJ = as.vector(unlist(qinan_["SUM_TBDLMJ"]))
+GDPDJ = as.vector(unlist(qinan_["MEAN_GDPDJ"]))
+Shape_Leng = as.vector(unlist(qinan_["MEAN_Shape"]))
+Shape_Area = as.vector(unlist(qinan_["MEAN_Sha_1"]))
+Area_len = as.vector(unlist(qinan_["MEAN_area_"]))
+
+Town = as.vector(unlist(qinan_["FIRST_Town"]))
+town_list = sort(unique(Town))
+village_list = sort(unique(QSDWDM))
+
+# town_list_f / village_list_f 是编号和村、镇的对应
+town_list_f = data.frame(town = town_list, number = 1:length(town_list))
+
+village_num = c()
+for(i in 1:length(town_list))
+{
+    village_num = c(village_num,1:nrow(qinan_[which(qinan_$FIRST_Town==town_list[i]),]))
+}
+village_list_f = data.frame(village = village_list, number = village_num)
+#
+
+ni = length(FID)
+n_Town = length(table(Town))
+n_Village = length(table(QSDWDM))
+
+## town_num village_num 是导入模型中的数据
+town_num = c()
+for(i in 1:n_Town)
+{
+  town_num = c(town_num, rep(i,nrow(qinan_[which(qinan_$FIRST_Town==town_list[i]),])))
+}
+
+nVillage = c()
+for(i in 1:n_Town)
+{
+  nVillage = c(nVillage, nrow(qinan_[which(qinan_$FIRST_Town==town_list[i]),]))
+}
+
+mydata = list(
+  N = TBDLMJ,
+  town = town_num,
+  village = village_num,
+  
+  TKXS = TKXS,
+  GDPDJ = GDPDJ,
+  Shape_Leng = Shape_Leng,
+  Shape_Area = Shape_Area,
+  Area_len = Area_len,
+  
+  ni = ni,
+  ntown = n_Town,
+  nvillage = nVillage,
+  nbeta = 3
+)
+```
+
+##### 层次模型结构
+```{r}
+
+qinan_model = "
+model{
+  
+  ## indexing
+  # i = microcensus enumeration zone
+  # t = residential type
+  # k = regression coefficient
+  
+  # beta = fixed effects of covariates
+
+  for(b in 1:nbeta){
+    beta[b] ~ dnorm(0, 1e-2)
+  }
+
+  
+  # beta[1:5] ~ dmnorm(mu_beta[], Omega[,])
+  
+  for(i in 1:ni){
+    
+    # D = true density of people
+    N[i] ~ dlnorm(Nbar[i], sigma2invD[town[i], village[i]])
+    
+    # Dbar = expected density
+    # Nbar[i] <- alpha[town[i], village[i]] + beta[1]*TKXS[i] + beta[2]*GDPDJ[i] + beta[3]*Shape_Leng[i] + beta[4]*Shape_Area[i] + beta[5]*Area_len[i]
+    
+    Nbar[i] <- alpha[town[i], village[i]] + beta[1]*TKXS[i] + beta[2]*GDPDJ[i] + beta[3]*Area_len[i]
+    
+    # posterior predictions
+    
+    Nhat[i] ~ dlnorm(Nbar[i], sigma2invD[town[i], village[i]])
+  }
+  
+  # alpha 
+  
+  mu_alpha_city ~ dnorm(0, 1e-4)
+  lambda_alpha_city ~ dgamma(10, 1)
+  sigma2inv_alpha_city ~ dgamma(1, 1)
+  
+  alpha0_city ~ dnorm(mu_alpha_city, sigma2inv_alpha_city)
+  
+  for(t in 1:ntown){
+    alpha0_town[t] ~ dnorm(mu_alpha_town[t], sigma2inv_alpha_town[t])
+    
+    mu_alpha_town[t] ~ dnorm(mu_alpha_city, sigma2inv_alpha_city)
+    sigma2inv_alpha_town[t] ~ dgamma(1, lambda_alpha_city)
+    # sigma2_alpha_town[t] <- 1/sigma2inv_alpha_town[t]
+    
+    for(v in 1:nvillage[t]){
+      alpha[t,v] ~ dnorm(mu_alpha_town[t], sigma2inv_alpha_town[t])
+      } 
+  }
+  
+
+  
+  # sigmaD 
+
+  lambda_sigmaD_city ~ dgamma(10, 1)
+  
+  for(t in 1:ntown){
+  
+    sigmaD0_town[t] ~ dgamma(1, lambda_sigmaD_town[t])
+    lambda_sigmaD_town[t] ~ dgamma(1, lambda_sigmaD_city)
+    
+    for(v in 1:nvillage[t]){
+          sigma2invD[t,v] ~ dgamma(1, lambda_sigmaD_town[t])
+        }
+      }
+
+}
+"
+```
+
+```{r}
+# 监测的参数
+set.seed(0)
+monitors = c("Nhat","mu_alpha_city","sigma2inv_alpha_city","lambda_alpha_city","lambda_sigmaD_city","beta")
+# 模型运行
+nsample = 10000
+PANSresults <- run.jags( qinan_model, data = mydata, method = "rjags", monitor = monitors,n.chains = 2, adapt = 1000, burnin = 5000, sample = nsample)
+# PANSresults <- run.jags( qinan_model, data = mydata, method = "rjags", monitor = monitors,n.chains = 2, adapt = 1000, burnin = 5000, sample = nsample,inits = init)
+summaries = PANSresults$summaries
+# write.csv(summaries,'summaries.csv')
+```
+#### 画出 N 和 Nhat 的折线图和参数的收敛过程
+```{r}
+summaries = PANSresults$summaries
+write.csv(summaries,'summaries.csv')
+Nhat = summaries[1:428,2]
+
+plot(TBDLMJ/10^6, Nhat/10^6, xlab = "N", ylab = "Nhat", main = "N with Nhat (10^6)", )
+abline(a=0,b=1,col="red")
+
+trace1 = matrix(unlist(PANSresults$mcmc[1]), nrow = nsample)
+monitor = PANSresults$monitor
+
+para1 = trace1[1:nsample,429:435]
+
+# write.csv(para1, 'para.csv')
+
+for(i in 1:7)
+{
+    plot(1:nsample, para1[,i], type = "l")
+}
+```
+
+### 导出plot数据
+```{r}
+# plotdata = data.frame(N = TBDLMJ/10^6, Nhat = Nhat/10^6)
+# path <- "N_Nhat.csv"
+# write.csv(plotdata, path)
+```
+
+
+##  抽样比例实验
+
+```{r}
+my_predict <-function(summaries,index,town_num,TKXS,GDPDJ,Area_len)
+{
+    Nhat_sum = sum(TBDLMJ[index])
+    alpha0_town = summaries[1:17,2]
+    sigmaD0_town = summaries[18:34,2]
+    beta = summaries[35:37,2]
+    beta_l = summaries[35:37,1]
+    beta_u = summaries[35:37,3]
+    select_beta = as.numeric(!(beta_l<0 & beta_u>0))
+    index_out = c(1:428)[-index]
+    
+    for(i in 1:length(index_out))
+    {
+        i_out = index_out[i]
+        TKXS_i = TKXS[i_out]
+        GDPDJ_i = GDPDJ[i_out]
+        Area_len_i = Area_len[i_out]
+        i_town_index = town_num[i_out]
+        
+        alpha_i = alpha0_town[i_town_index]
+        sigmaD_i = sigmaD0_town[i_town_index]
+        Nhat_sum = Nhat_sum + exp(alpha_i + sum(select_beta*beta*c(TKXS_i,GDPDJ_i,Area_len_i))+1/sigmaD_i)
+        
+    }
+    return(Nhat_sum)
+}
+```
+
+```{r}
+library('runjags')
+runjags.options(force.summary=TRUE)
+set.seed(0)
+
+iter = 50
+sample_rate = seq(0.05,0.5,0.05)
+SUM_TBDLMJ_real = sum(qinan_$SUM_TBDLMJ)
+
+mean_TKXS = mean(qinan_$MEAN_TKXS)
+mean_GDPDJ = mean(qinan_$MEAN_GDPDJ)
+mean_Area_len = mean(qinan_$MEAN_area_)
+
+sum_N_hat = c()
+sum_N_upper = c()
+sum_N_lower = c()
+
+for(i in 1:length(sample_rate))
+{
+    sh = c()
+    sh2 = c()
+    for(j in 1:iter)
+    {
+        rate = sample_rate[i]
+        ns = ceiling(ni*rate)
+        index = sort(sample(1:ni, ns))
+        
+        N = TBDLMJ[index]
+        sh2 = c(sh2,sum(N)/ns*ni)
+    
+        mydata = list(
+            N = TBDLMJ[index],
+            town = town_num[index],
+            village = village_num[index],
+  
+            TKXS = TKXS[index],
+            GDPDJ = GDPDJ[index],
+            Area_len = Area_len[index],
+  
+            ni = ns,
+            ntown = n_Town,
+            nvillage = nVillage,
+            nbeta = 3
+        )
+
+        monitors = c("alpha0_town","sigmaD0_town","beta")
+        PANSresults <- run.jags(qinan_model, data = mydata, method = "rjags", monitor = monitors,n.chains = 2, adapt = 1000, burnin = 5000, sample = 5000)
+        summaries = PANSresults$summaries
+        
+        sh = c(sh, my_predict(summaries,index,town_num,TKXS,GDPDJ,Area_len))
+
+    }
+    sum_N_hat = c(sum_N_hat,mean(sh))
+    sum_N_upper = c(sum_N_upper,quantile(sh,0.975))
+    sum_N_lower = c(sum_N_lower,quantile(sh,0.025))
+    sh = c()
+    # sl = c()
+}
+
+# plotdata = data.frame(sample_rate,sum_N_hat,sum_N_upper, sum_N_lower)
+# write.csv(plotdata, 'Nhat_samplerate_50_00505.csv')
+```
+
+
+## 研究抽样的鲁棒性，不均匀的抽样会对精度造成什么影响
+
+```{r}
+# 我们固定抽样的数目为15%
+library('runjags')
+runjags.options(force.summary=TRUE)
+set.seed(0)
+iter = 200
+num_town_samp = 5:17
+
+b_sum_N_hat = c()
+b_sum_N_upper = c()
+b_sum_N_lower = c()
+
+for(i in 1:length(num_town_samp))
+{
+    sh = c()
+    for(j in 1:iter)
+    {
+        rate = 0.15
+        town_id = unique(qinan_$FIRST_Town)
+        sampled_town = sample(town_id, size = num_town_samp[i], replace = F)
+        ns = ceiling(ni*rate)
+        index_sampled = c()
+        for(town in sampled_town)
+        {
+            index_sampled = c(index_sampled, qinan_$OID[qinan_$FIRST_Town==town])
+        }
+        index = sort(sample(index_sampled, ns))
+    
+        mydata = list(
+        N = TBDLMJ[index],
+        town = town_num[index],
+        village = village_num[index],
+
+        TKXS = TKXS[index],
+        GDPDJ = GDPDJ[index],
+        Area_len = Area_len[index],
+
+        ni = ns,
+        ntown = n_Town,
+        nvillage = nVillage,
+        nbeta = 3
+        )
+        monitors = c("alpha0_town","sigmaD0_town","beta")
+        PANSresults <- run.jags(qinan_model, data = mydata, method = "rjags", monitor = monitors,n.chains = 2, adapt = 1000, burnin = 5000, sample = 5000)
+        summaries = PANSresults$summaries
+        sh = c(sh, my_predict(summaries,index,town_num,TKXS,GDPDJ,Area_len))
+    }
+    b_sum_N_hat = c(b_sum_N_hat,mean(sh))
+    b_sum_N_upper = c(b_sum_N_upper, quantile(sh, 0.975))
+    b_sum_N_lower = c(b_sum_N_lower, quantile(sh, 0.025))
+    sh = c()
+}
+
+# plotdata = data.frame(num_town_samp,b_sum_N_hat,b_sum_N_upper,b_sum_N_lower)
+# write.csv(plotdata, 'Nhat_villnum_015_200.csv')
+```
+
+
