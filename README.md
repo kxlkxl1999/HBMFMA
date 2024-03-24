@@ -1,5 +1,5 @@
 # hierarchical-Bayesian-modeling-in-Farmland-mulching-area-survey
-Support material of "Estimating Farmland Mulching Areas through the Optimization of Sparse Remote Sensing Data within a Hierarchical Bayesian Framework"
+Support material of "Inferring the Farmland Mulching Area by Optimizing Sparse Remote-Sensing Data Within a Hierarchical Bayesian Framework"
 
 ## remote sensing/qinan.Rmd
 Codes related to main conclusions in the article, including hierarchical Bayesian model.
