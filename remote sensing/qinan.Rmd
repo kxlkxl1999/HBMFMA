@@ -8,7 +8,7 @@ output: html_document
 ##### 秦安县数据分析：读取数据
 ```{r}
 # ============== county-town-village ============================
-qinan = read.csv("./qinan2.csv", colClasses =c('numeric', 'character',rep('numeric', 9)))
+qinan = read.csv("./qinan2.csv", colClasses =c('numeric', 'character',rep('numeric', 9)), encoding = 'UTF-8')
 qinan_ = qinan[which(qinan$FIRST_Town%/%1000==620522),]
 qinan_$OID = 1:nrow(qinan_)
 qinan_$FIRST_Town = as.character(qinan_$FIRST_Town)
@@ -97,268 +97,727 @@ mydata = list(
 qinan_model = "
 model{
   
-  ## indexing
-  # i = microcensus enumeration zone
-  # t = residential type
-  # k = regression coefficient
   
   # beta = fixed effects of covariates
 
   for(b in 1:nbeta){
-    beta[b] ~ dnorm(0, 1e-2)
+    beta[b] ~ dnorm(0, 4)
   }
-
-  
-  # beta[1:5] ~ dmnorm(mu_beta[], Omega[,])
+    
   
   for(i in 1:ni){
     
     # D = true density of people
     N[i] ~ dlnorm(Nbar[i], sigma2invD[town[i], village[i]])
-    
-    # Dbar = expected density
-    # Nbar[i] <- alpha[town[i], village[i]] + beta[1]*TKXS[i] + beta[2]*GDPDJ[i] + beta[3]*Shape_Leng[i] + beta[4]*Shape_Area[i] + beta[5]*Area_len[i]
-    
-    Nbar[i] <- alpha[town[i], village[i]] + beta[1]*TKXS[i] + beta[2]*GDPDJ[i] + beta[3]*Area_len[i]
-    
-    # posterior predictions
-    
     Nhat[i] ~ dlnorm(Nbar[i], sigma2invD[town[i], village[i]])
+    # 带3个协变量的模型
+    Nbar[i] <- alpha[town[i], village[i]] + beta[1]*TKXS[i] + beta[2]*GDPDJ[i] + beta[3]*Area_len[i]
+    # Nbar[i] <- alpha[town[i], village[i]] + beta[1]*TKXS[i] + beta[2]*GDPDJ[i]
+    
   }
   
   # alpha 
+  ###Hyper-parameter
+  ###First level
+  mu_alpha_city ~ dnorm(0.5, 4)
+  lambda_alpha_city ~ dgamma(1, 10)
+  sigma2inv_alpha_city ~ dgamma(1, 0.1)
   
-  mu_alpha_city ~ dnorm(0, 1e-4)
-  lambda_alpha_city ~ dgamma(10, 1)
-  sigma2inv_alpha_city ~ dgamma(1, 1)
-  
-  alpha0_city ~ dnorm(mu_alpha_city, sigma2inv_alpha_city)
+  ## alpha0_city ~ dnorm(mu_alpha_city, sigma2inv_alpha_city)
   
   for(t in 1:ntown){
+  
     alpha0_town[t] ~ dnorm(mu_alpha_town[t], sigma2inv_alpha_town[t])
-    
     mu_alpha_town[t] ~ dnorm(mu_alpha_city, sigma2inv_alpha_city)
     sigma2inv_alpha_town[t] ~ dgamma(1, lambda_alpha_city)
-    # sigma2_alpha_town[t] <- 1/sigma2inv_alpha_town[t]
     
     for(v in 1:nvillage[t]){
       alpha[t,v] ~ dnorm(mu_alpha_town[t], sigma2inv_alpha_town[t])
       } 
   }
   
-
-  
   # sigmaD 
 
-  lambda_sigmaD_city ~ dgamma(10, 1)
+  lambda_sigmaD_city ~ dgamma(20, 1)
   
   for(t in 1:ntown){
-  
-    sigmaD0_town[t] ~ dgamma(1, lambda_sigmaD_town[t])
+ 
     lambda_sigmaD_town[t] ~ dgamma(1, lambda_sigmaD_city)
     
     for(v in 1:nvillage[t]){
-          sigma2invD[t,v] ~ dgamma(1, lambda_sigmaD_town[t])
+          sigma2invD[t,v] ~ dgamma(2, lambda_sigmaD_town[t])
         }
-      }
-
+  }
+      
 }
 "
 ```
 
-```{r}
-# 监测的参数
-set.seed(0)
-monitors = c("Nhat","mu_alpha_city","sigma2inv_alpha_city","lambda_alpha_city","lambda_sigmaD_city","beta")
-# 模型运行
-nsample = 10000
-PANSresults <- run.jags( qinan_model, data = mydata, method = "rjags", monitor = monitors,n.chains = 2, adapt = 1000, burnin = 5000, sample = nsample)
-# PANSresults <- run.jags( qinan_model, data = mydata, method = "rjags", monitor = monitors,n.chains = 2, adapt = 1000, burnin = 5000, sample = nsample,inits = init)
-summaries = PANSresults$summaries
-# write.csv(summaries,'summaries.csv')
-```
-#### 画出 N 和 Nhat 的折线图和参数的收敛过程
-```{r}
-summaries = PANSresults$summaries
-write.csv(summaries,'summaries.csv')
-Nhat = summaries[1:428,2]
 
-plot(TBDLMJ/10^6, Nhat/10^6, xlab = "N", ylab = "Nhat", main = "N with Nhat (10^6)", )
+
+```{r}
+# full-data 模型
+
+set.seed(0)
+# monitors = c("Nhat","mu_alpha_city","sigma2inv_alpha_city","lambda_alpha_city","lambda_sigmaD_city")
+# monitors = c("Nhat")
+monitors = c("beta")
+# monitors = c("dic","mu_alpha_town","lambda_sigmaD_town", "sigma2inv_alpha_town","beta")
+# monitors = c("mu_alpha_city","mu_alpha_town")
+# 模型运行
+nsample = 5000
+PANSresults <- run.jags(qinan_model, data = mydata, method = "rjags", monitor = monitors,n.chains = 2, adapt = 1000, burnin = 5000, sample = nsample,thin=10)
+# PANSresults <- run.jags(qinan_model, data = mydata, method = "rjags", monitor = monitors,n.chains = 2, adapt = 1000, burnin = 5000, sample = nsample,inits = init)
+summaries = PANSresults$summaries
+# write.csv(summaries,'alpha_summaries.csv')
+print(PANSresults)
+```
+
+
+# 看fulldata model在townlevel上的预测准确度
+```{r}
+summaries_t = data.frame(summaries)
+summaries_t["town_num"] = town_num
+tapply(summaries_t[,1], summaries_t$town_num, sum)
+townlevel_pre = tapply(summaries_t[,2], summaries_t$town_num, sum)
+tapply(summaries_t[,3], summaries_t$town_num, sum)
+
+qinan_["town_num"] = town_num
+townlevel_real = tapply(qinan_$SUM_TBDLMJ, qinan_$town_num, sum)
+
+plot(townlevel_real/10^6, townlevel_pre/10^6, xlab = "True N in town level", ylab = "Estimated N in town level", main = "Real-data area estimation at the town level (10^6)", xlim = c(1,100),ylim = c(1,100))
 abline(a=0,b=1,col="red")
+```
+
+```{r} 
+monitors = c("Nhat")
+nsample = 5000
+PANSresults <- run.jags(qinan_model, data = mydata, method = "rjags", monitor = monitors,n.chains = 2, adapt = 1000, burnin = 5000, sample = nsample)
+# PANSresults <- run.jags(qinan_model, data = mydata, method = "rjags", monitor = monitors,n.chains = 2, adapt = 1000, burnin = 5000, sample = nsample,inits = init)
+summaries = PANSresults$summaries
+# write.csv(summaries,'alpha_summaries.csv')
+# print(PANSresults)
+
 
 trace1 = matrix(unlist(PANSresults$mcmc[1]), nrow = nsample)
-monitor = PANSresults$monitor
 
-para1 = trace1[1:nsample,429:435]
+para1 = t(trace1[1:nsample,1:428])
 
-# write.csv(para1, 'para.csv')
+# townlevel = matrix(0,nsample,17)
+para1_t = data.frame(para1)
+para1_t["town_num"] = town_num
 
-for(i in 1:7)
+townlevel_pre = matrix(0,17,nsample)
+county_level_pre = c()
+for(i in 1:nsample)
 {
-    plot(1:nsample, para1[,i], type = "l")
+    townlevel_pre[,i] = tapply(para1_t[,i], para1_t$town_num, sum)
+    county_level_pre = c(county_level_pre,sum(para1_t[,i]))
 }
-```
 
-### 导出plot数据
-```{r}
-# plotdata = data.frame(N = TBDLMJ/10^6, Nhat = Nhat/10^6)
-# path <- "N_Nhat.csv"
-# write.csv(plotdata, path)
-```
-
-
-##  抽样比例实验
-
-```{r}
-my_predict <-function(summaries,index,town_num,TKXS,GDPDJ,Area_len)
+quant95 = function(x)
 {
-    Nhat_sum = sum(TBDLMJ[index])
+    return(quantile(x,0.95))
+}
+
+quant05 = function(x)
+{
+    return(quantile(x,0.05))
+}
+
+qt95 = apply(townlevel_pre, 1, quant95)
+qt50 = apply(townlevel_pre, 1, median)
+qt05 = apply(townlevel_pre, 1, quant05)
+
+print(qt05)
+print(qt50)
+print(qt95)
+
+print(mean(county_level_pre))
+print(median(county_level_pre))
+print(quantile(county_level_pre,0.95))
+print(quantile(county_level_pre,0.05))
+```
+```{r}
+# 0.3的抽样比例下townlevel CI
+
+my_predict_point <-function(summaries,index,town_num,TKXS,GDPDJ,Area_len)
+{
     alpha0_town = summaries[1:17,2]
     sigmaD0_town = summaries[18:34,2]
     beta = summaries[35:37,2]
     beta_l = summaries[35:37,1]
     beta_u = summaries[35:37,3]
     select_beta = as.numeric(!(beta_l<0 & beta_u>0))
-    index_out = c(1:428)[-index]
+    result = c()
     
-    for(i in 1:length(index_out))
+    for(i in 1:length(index))
     {
-        i_out = index_out[i]
-        TKXS_i = TKXS[i_out]
-        GDPDJ_i = GDPDJ[i_out]
-        Area_len_i = Area_len[i_out]
-        i_town_index = town_num[i_out]
+        i_ = index[i]
+        TKXS_i = TKXS[i_]
+        GDPDJ_i = GDPDJ[i_]
+        Area_len_i = Area_len[i_]
+
+        i_town_index = town_num[i_]
         
         alpha_i = alpha0_town[i_town_index]
         sigmaD_i = sigmaD0_town[i_town_index]
-        Nhat_sum = Nhat_sum + exp(alpha_i + sum(select_beta*beta*c(TKXS_i,GDPDJ_i,Area_len_i))+1/sigmaD_i)
-        
+        result = c(result, exp(alpha_i + sum(select_beta*beta*c(TKXS_i,GDPDJ_i,Area_len_i))+2*sigmaD_i))
     }
-    return(Nhat_sum)
+    return(result)
 }
+
+niter = 10
+townlevel = matrix(0,niter,17)
+
+for(i in 1:niter)
+{
+    rate=0.3
+    ns = floor(428*rate)
+    index = sort(sample(1:428, ns))
+    index_out = c(1:428)[-index]
+    N = TBDLMJ[index]
+    
+    mydata = list(
+        N = TBDLMJ[index],
+        town = town_num[index],
+        village = village_num[index],
+        
+        TKXS = TKXS[index],
+        GDPDJ = GDPDJ[index],
+        Area_len = Area_len[index],
+        
+        ni = ns,
+        ntown = n_Town,
+        nvillage = nVillage,
+        nbeta = 3
+    )
+    
+    # monitors = c("alpha0_town","sigmaD0_town","beta")
+    monitors = c("mu_alpha_town","lambda_sigmaD_town","beta")
+    # monitors = c("alpha0_town","sigmaD0_town", "mu_alpha_city", "lambda_alpha_city", "sigma2inv_alpha_city", "lambda_sigmaD_city")
+    # monitors = c("Nhat")
+    PANSresults <- run.jags(qinan_model, data = mydata, method = "rjags", monitor = monitors,n.chains = 2, adapt = 1000, burnin = 5000, sample = 2000)
+    summaries = PANSresults$summaries
+    N_point = c(N,my_predict_point(summaries,index_out,town_num,TKXS,GDPDJ,Area_len))
+    index_list = c(index,index_out)
+    mydata = data.frame(N_point,index_list)
+    mydata = mydata[order(mydata$index_list),]
+    mydata["town_num"] = town_num
+    
+    townlevel_pre = tapply(mydata[,1], mydata$town_num, sum)
+    townlevel[i,] = townlevel_pre
+}
+
+quant95 = function(x)
+{
+    return(quantile(x,0.95))
+}
+
+quant05 = function(x)
+{
+    return(quantile(x,0.05))
+}
+
+qt95 = apply(townlevel, 2, quant95)
+qt50 = apply(townlevel, 2, median)
+qt05 = apply(townlevel, 2, quant05)
+
 ```
 
 ```{r}
+# 0.7/0.3 train/test townlevel CI
+my_predict_test <-function(para,index,town_num,TKXS,GDPDJ,Area_len) # 对一组sample para 做testset上的预测
+{
+    alpha0_town = para[1:17]
+    sigmaD0_town = para[18:34]
+    beta = summaries[35:37]
+    result = c()
+    
+    for(i in 1:length(index))
+    {
+        i_ = index[i]
+        TKXS_i = TKXS[i_]
+        GDPDJ_i = GDPDJ[i_]
+        Area_len_i = Area_len[i_]
+
+        i_town_index = town_num[i_]
+        
+        alpha_i = alpha0_town[i_town_index]
+        sigmaD_i = sigmaD0_town[i_town_index]
+        result = c(result, exp(alpha_i + sum(beta*c(TKXS_i,GDPDJ_i,Area_len_i))+2*sigmaD_i))
+    }
+    return(result)
+}
+
+rate=0.7
+ns = floor(428*rate)
+index = sort(sample(1:428, ns))
+index_out = c(1:428)[-index]
+N = TBDLMJ[index]
+
+mydata = list(
+    N = TBDLMJ[index],
+    town = town_num[index],
+    village = village_num[index],
+    
+    TKXS = TKXS[index],
+    GDPDJ = GDPDJ[index],
+    Area_len = Area_len[index],
+    
+    ni = ns,
+    ntown = n_Town,
+    nvillage = nVillage,
+    nbeta = 3
+)
+
+monitors = c("mu_alpha_town","lambda_sigmaD_town","beta")
+nsample = 1000
+PANSresults <- run.jags(qinan_model, data = mydata, method = "rjags", monitor = monitors,n.chains = 2, adapt = 1000, burnin = 5000, sample = nsample)
+summaries = PANSresults$summaries
+
+
+trace1 = matrix(unlist(PANSresults$mcmc[1]), nrow = nsample)
+
+para1 = t(trace1[1:nsample,1:37])
+
+# townlevel = matrix(0,nsample,17)
+# para1_t["town_num"] = town_num[index]
+
+townlevel_pre = matrix(0,length(table(town_num[index_out])),nsample)
+
+for(i in 1:nsample)
+{
+    para = para1[,i]
+    
+    pre_list = my_predict_test(para,index_out,town_num,TKXS,GDPDJ,Area_len)
+    mydata = data.frame(pre_list,index_out)
+    mydata = mydata[order(mydata$index_out),]
+    mydata["town_num"] = town_num[index_out]
+    townlevel_pre[,i] = tapply(mydata[,1], mydata$town_num, sum)
+    
+}
+
+quant95 = function(x)
+{
+    return(quantile(x,0.95))
+}
+
+quant05 = function(x)
+{
+    return(quantile(x,0.05))
+}
+
+qt95 = apply(townlevel_pre, 1, quant95)
+qt50 = apply(townlevel_pre, 1, median)
+qt05 = apply(townlevel_pre, 1, quant05)
+
+realN = TBDLMJ[index_out]
+mydataN = data.frame(realN,index_out)
+mydataN = mydata[order(mydataN$index_out),]
+mydataN["town_num"] = town_num[index_out]
+
+print(table(town_num[index_out]))
+print(tapply(mydataN[,1], mydata$town_num, sum))
+
+print(qt05)
+print(qt50)
+print(qt95)
+
+```
+
+```{r}
+# variance in town level
+townlevel = matrix(0,5,17)
+for(i in 1:5)
+{
+    monitors = c("Nhat")
+    nsample = 5000
+    PANSresults <- run.jags(qinan_model, data = mydata, method = "rjags", monitor = monitors,n.chains = 2, adapt = 1000, burnin = 5000, sample = nsample)
+    summaries = PANSresults$summaries
+    summaries_t = data.frame(summaries)
+    summaries_t["town_num"] = town_num
+    townlevel_pre = tapply(summaries_t[,2], summaries_t$town_num, sum)
+    townlevel[i,] = townlevel_pre
+}
+
+apply(townlevel, 2, sd)
+```
+
+```{r}
+# quantile in town level
+townlevel = matrix(0,2,17)
+for(i in 1:2)
+{
+    monitors = c("Nhat")
+    nsample = 3000
+    PANSresults <- run.jags(qinan_model, data = mydata, method = "rjags", monitor = monitors,n.chains = 2, adapt = 1000, burnin = 3000, sample = nsample)
+    summaries = PANSresults$summaries
+    summaries_t = data.frame(summaries)
+    summaries_t["town_num"] = town_num
+    townlevel_pre = tapply(summaries_t[,2], summaries_t$town_num, sum)
+    townlevel[i,] = townlevel_pre
+}
+
+quant95 = function(x)
+{
+    return(quantile(x,0.95))
+}
+
+quant05 = function(x)
+{
+    return(quantile(x,0.05))
+}
+
+qt95 = apply(townlevel, 2, quant95)
+
+qt05 = apply(townlevel, 2, quant05)
+```
+
+
+#### 画出 N 和 Nhat 的折线图和参数的收敛过程
+```{r}
+trace1 = matrix(unlist(PANSresults$mcmc[1]), nrow = nsample)
+para1 = trace1[1:nsample,1:3]
+
+# write.csv(para1, 'para.csv')
+
+for(i in 1:3)
+{
+    plot(1:nsample, para1[,i], type = "l")
+    print(quantile(para1[,i],0.1))
+    print(quantile(para1[,i],0.8))
+    print(quantile(para1[,i],0.05))
+    print(quantile(para1[,i],0.95))
+    print(quantile(para1[,i],0.5))
+    print(mean(para1[,i]))
+}
+```
+
+### 交叉验证Nhat-N
+```{r warning=FALSE}
+## 看单样本的验证效果如何
+
+# (1)通过后验参数 预测验证集的单点值?感觉没有意义，不可行。模型不是为了准确估计村一级而建立的
+# (2)我们的模型没有办法对单点值进行估计,是为了对全体总值估计的.所以使用训练集估计模型参数,然后使用后验分布估计验证集总值,最后将5个验证集总值相加,验证此时是否准确,或者画出这些验证集总值的真值和预测值曲线
 library('runjags')
 runjags.options(force.summary=TRUE)
 set.seed(0)
 
-iter = 50
-sample_rate = seq(0.05,0.5,0.05)
-SUM_TBDLMJ_real = sum(qinan_$SUM_TBDLMJ)
+my_predict_point <-function(summaries,index,town_num,TKXS,GDPDJ,Area_len)
+{
+    alpha0_town = summaries[1:17,2]
+    sigmaD0_town = summaries[18:34,2]
+    beta = summaries[35:37,2]
+    beta_l = summaries[35:37,1]
+    beta_u = summaries[35:37,3]
+    select_beta = as.numeric(!(beta_l<0 & beta_u>0))
+    result = c()
+    
+    for(i in 1:length(index))
+    {
+        i_ = index[i]
+        TKXS_i = TKXS[i_]
+        GDPDJ_i = GDPDJ[i_]
+        Area_len_i = Area_len[i_]
 
-mean_TKXS = mean(qinan_$MEAN_TKXS)
-mean_GDPDJ = mean(qinan_$MEAN_GDPDJ)
-mean_Area_len = mean(qinan_$MEAN_area_)
+        i_town_index = town_num[i_]
+        
+        alpha_i = alpha0_town[i_town_index]
+        sigmaD_i = sigmaD0_town[i_town_index]
+        result = c(result, exp(alpha_i + sum(select_beta*beta*c(TKXS_i,GDPDJ_i,Area_len_i))+1/sigmaD_i/2))
+    }
+    return(result)
+}
+
+rmse <- function(real, pred)
+{
+    n = length(real)
+    return(sqrt(sum((real-pred)^2)/n))
+}
+
+library(caret)
+set.seed(0)
+iter = 1
+csv_index = c()
+csv_rmse_train = c()
+csv_rmse_test = c()
+
+for(it in 1:iter)
+{
+    folds = createFolds(seq(1,ni,1),k=10)
+    for(i in 1:10)
+    {
+      index = folds[[i]]
+      index_out = c(1:428)[-index]
+      ns = length(index_out)
+      
+      N = TBDLMJ[index_out]
+      # sh2 = c(sh2,sum(N)/ns*ni)
+      
+      mydata = list(
+        N = TBDLMJ[index_out],
+        town = town_num[index_out],
+        village = village_num[index_out],
+      
+        TKXS = TKXS[index_out],
+        GDPDJ = GDPDJ[index_out],
+        Area_len = Area_len[index_out],
+      
+        ni = ns,
+        ntown = n_Town,
+        nvillage = nVillage,
+        nbeta = 3
+      )
+      
+      monitors = c("mu_alpha_town","sigma2inv_alpha_town","beta")
+      PANSresults <- run.jags(qinan_model, data = mydata, method = "rjags", monitor = monitors,n.chains = 2, adapt = 1000, burnin = 5000, sample = 5000)
+      summaries = PANSresults$summaries,2]
+      
+
+      csv_index = c(csv_index, i)
+      csv_rmse_train = c(csv_rmse_train, rmse(TBDLMJ[index_out], my_predict_point(summaries,index_out,town_num,TKXS,GDPDJ,Area_len)))
+      csv_rmse_test = c(csv_rmse_test, rmse(TBDLMJ[index], my_predict_point(summaries,index,town_num,TKXS,GDPDJ,Area_len)))
+
+    }
+}
+
+plotdata2 = data.frame(index = csv_index, rmse_train = csv_rmse_train, rmse_test = csv_rmse_test)
+path <- "mse_N_Nhat_cv.csv"
+write.csv(plotdata2, path)
+
+# plotdata = data.frame(N = csv_N/10^6, Nhat = csv_Nhat/10^6)
+# path <- "N_Nhat_cv.csv"
+# write.csv(plotdata, path)
+
+plot(csv_rmse_train/10^5, csv_rmse_test/10^5, xlab = "RMSE", ylab = "RMSPE", main = "Real-data RMSE with RMSPE in 10-fold cross validation (10^5)", xlim = c(1,12),ylim = c(1,12))
+abline(a=0,b=1,col="red")
+```
+
+
+```{r}
+# 进行和简单随机抽样对比的模拟实验 realdata
+
+my_predict_point <-function(summaries,index,town_num,TKXS,GDPDJ,Area_len)
+{
+    alpha0_town = summaries[1:17,2]
+    sigmaD0_town = summaries[18:34,2]
+    beta = summaries[35:37,2]
+    beta_l = summaries[35:37,1]
+    beta_u = summaries[35:37,3]
+    select_beta = as.numeric(!(beta_l<0 & beta_u>0))
+    result = c()
+    
+    for(i in 1:length(index))
+    {
+        i_ = index[i]
+        TKXS_i = TKXS[i_]
+        GDPDJ_i = GDPDJ[i_]
+        Area_len_i = Area_len[i_]
+
+        i_town_index = town_num[i_]
+        
+        alpha_i = alpha0_town[i_town_index]
+        sigmaD_i = sigmaD0_town[i_town_index]
+        result = c(result, exp(alpha_i + sum(select_beta*beta*c(TKXS_i,GDPDJ_i,Area_len_i))+2*sigmaD_i))
+    }
+    return(result)
+}
+
+library('runjags')
+runjags.options(force.summary=TRUE)
+set.seed(0)
+library(invgamma)
+
+niter = 10
+sample_rate = seq(0.3,0.5,0.1)
+real_sumN = 832533410.96
 
 sum_N_hat = c()
 sum_N_upper = c()
 sum_N_lower = c()
+mse1 = c()
+
+sum_N_hat2 = c()
+sum_N_upper2 = c()
+sum_N_lower2 = c()
+mse2 = c()
+
 
 for(i in 1:length(sample_rate))
 {
     sh = c()
     sh2 = c()
-    for(j in 1:iter)
+
+    # N_hb = c()
+    # N_srs = c()
+    for(j in 1:niter)
     {
         rate = sample_rate[i]
-        ns = ceiling(ni*rate)
-        index = sort(sample(1:ni, ns))
-        
+        ns = floor(428*rate)
+        index = sort(sample(1:428, ns))
+        index_out = c(1:428)[-index]
         N = TBDLMJ[index]
         sh2 = c(sh2,sum(N)/ns*ni)
-    
+        
         mydata = list(
             N = TBDLMJ[index],
             town = town_num[index],
             village = village_num[index],
-  
+            
             TKXS = TKXS[index],
             GDPDJ = GDPDJ[index],
             Area_len = Area_len[index],
-  
+            
             ni = ns,
             ntown = n_Town,
             nvillage = nVillage,
             nbeta = 3
         )
 
-        monitors = c("alpha0_town","sigmaD0_town","beta")
-        PANSresults <- run.jags(qinan_model, data = mydata, method = "rjags", monitor = monitors,n.chains = 2, adapt = 1000, burnin = 5000, sample = 5000)
+        # monitors = c("alpha0_town","sigmaD0_town","beta")
+        monitors = c("mu_alpha_town","lambda_sigmaD_town","beta")
+        # monitors = c("alpha0_town","sigmaD0_town", "mu_alpha_city", "lambda_alpha_city", "sigma2inv_alpha_city", "lambda_sigmaD_city")
+        # monitors = c("Nhat")
+        PANSresults <- run.jags(qinan_model, data = mydata, method = "rjags", monitor = monitors,n.chains = 2, adapt = 1000, burnin = 5000, sample = 2000)
         summaries = PANSresults$summaries
         
-        sh = c(sh, my_predict(summaries,index,town_num,TKXS,GDPDJ,Area_len))
+        sh = c(sh, sum(N) + sum(my_predict_point(summaries,index_out,town_num,TKXS,GDPDJ,Area_len)))
 
     }
     sum_N_hat = c(sum_N_hat,mean(sh))
     sum_N_upper = c(sum_N_upper,quantile(sh,0.975))
     sum_N_lower = c(sum_N_lower,quantile(sh,0.025))
+    mse1 = c(mse1, sqrt(sum((sh-real_sumN)^2/niter)))
     sh = c()
+    sum_N_hat2 = c(sum_N_hat2,mean(sh2))
+    sum_N_upper2 = c(sum_N_upper2,quantile(sh2,0.975))
+    sum_N_lower2 = c(sum_N_lower2,quantile(sh2,0.025))
+    mse2 = c(mse2, sqrt(sum((sh2-real_sumN)^2/niter)))
+    sh2 = c()
     # sl = c()
 }
 
-# plotdata = data.frame(sample_rate,sum_N_hat,sum_N_upper, sum_N_lower)
-# write.csv(plotdata, 'Nhat_samplerate_50_00505.csv')
+plotdata = data.frame(sample_rate, real_sumN,sum_N_hat,sum_N_upper, sum_N_lower,mse1 ,sum_N_hat2,sum_N_upper2, sum_N_lower2,mse2)
+# write.csv(plotdata, 'simu_Nhat_samplerate_50_0105.csv')
 ```
 
-
-## 研究抽样的鲁棒性，不均匀的抽样会对精度造成什么影响
-
 ```{r}
-# 我们固定抽样的数目为15%
+# 进行置信区间覆盖范围的模拟实验
 library('runjags')
 runjags.options(force.summary=TRUE)
-set.seed(0)
-iter = 200
-num_town_samp = 5:17
+library('coda')
+set.seed(99)
+library(invgamma)
 
-b_sum_N_hat = c()
-b_sum_N_upper = c()
-b_sum_N_lower = c()
+n1=20
+n2=50
+ni = n1 * n2
 
-for(i in 1:length(num_town_samp))
+mu = rnorm(1, 0.5, 0.5)
+# shape:alpha rate:beta
+tau2 = rinvgamma(1, 1, 0.1)
+# shape:alpha rate:beta
+lambda_a = rgamma(1,1,10)
+mu_t = rnorm(n1, mu, sqrt(tau2))
+tau2_t = rinvgamma(n1, 1,lambda_a)
+alpha_tv = c()
+
+lambda = rgamma(1, 20, 1)
+lambda_t = rgamma(n1, 1,lambda)
+sigma_tv = c()
+
+#####Regression term
+X<-matrix(rnorm(2*n1*n2), n1*n2, 2)
+beta=as.matrix(c(0.5, -0.5))
+
+Mu = X%*%beta
+
+Ni = c()
+
+for(t in 1:n1)
 {
-    sh = c()
-    for(j in 1:iter)
-    {
-        rate = 0.15
-        town_id = unique(qinan_$FIRST_Town)
-        sampled_town = sample(town_id, size = num_town_samp[i], replace = F)
-        ns = ceiling(ni*rate)
-        index_sampled = c()
-        for(town in sampled_town)
-        {
-            index_sampled = c(index_sampled, qinan_$OID[qinan_$FIRST_Town==town])
-        }
-        index = sort(sample(index_sampled, ns))
-    
-        mydata = list(
-        N = TBDLMJ[index],
-        town = town_num[index],
-        village = village_num[index],
-
-        TKXS = TKXS[index],
-        GDPDJ = GDPDJ[index],
-        Area_len = Area_len[index],
-
-        ni = ns,
-        ntown = n_Town,
-        nvillage = nVillage,
-        nbeta = 3
-        )
-        monitors = c("alpha0_town","sigmaD0_town","beta")
-        PANSresults <- run.jags(qinan_model, data = mydata, method = "rjags", monitor = monitors,n.chains = 2, adapt = 1000, burnin = 5000, sample = 5000)
-        summaries = PANSresults$summaries
-        sh = c(sh, my_predict(summaries,index,town_num,TKXS,GDPDJ,Area_len))
-    }
-    b_sum_N_hat = c(b_sum_N_hat,mean(sh))
-    b_sum_N_upper = c(b_sum_N_upper, quantile(sh, 0.975))
-    b_sum_N_lower = c(b_sum_N_lower, quantile(sh, 0.025))
-    sh = c()
+  
+  a_tv = rnorm(n2, mu_t[t], sqrt(tau2_t[t]))
+  s_tv = rinvgamma(n2, 2, lambda_t[t])
+  alpha_tv = c(alpha_tv,a_tv)
+  sigma_tv = c(sigma_tv,s_tv)
+ 
 }
 
-# plotdata = data.frame(num_town_samp,b_sum_N_hat,b_sum_N_upper,b_sum_N_lower)
-# write.csv(plotdata, 'Nhat_villnum_015_200.csv')
+Ni=NULL
+for(i in 1:(n1*n2))
+  Ni = c(Ni, rlnorm(1, Mu[i]+alpha_tv[i], sqrt(sigma_tv[i])))
+
+###town membership
+town = c()
+for(k in 1:n1)
+{
+  town = c(town,rep(k,n2))
+}
+
+village = rep(seq(1,n2,1), n1)
+
+ntown = n1
+nVillage = rep(n2,n1)
+real_sumN = sum(Ni)
+
+x1=X[,1]; x2=X[,2]; ni = n1*n2
+
+mydata = list(
+  N = Ni,
+  town = town,
+  village = village,
+  TKXS = x1,
+  GDPDJ = x2,
+  
+  nbeta = 2,
+  ni = ni,
+  ntown = ntown,
+  nvillage = nVillage
+)
+
+monitors = c("alpha","sigma2invD")
+# monitors = c("dic","beta")
+# monitors = c("beta","mu_alpha_town", "sigma2inv_alpha_town", "lambda_sigmaD_town")
+# monitors = c("dic", "alpha0_town", "mu_alpha_town", "sigma2inv_alpha_town", "lambda_sigmaD_town", "mu_alpha_city", "lambda_alpha_city", "sigma2inv_alpha_city", "lambda_sigmaD_city","beta")
+PANSresults <- run.jags(model_Sim, data = mydata, method = "rjags", monitor = monitors,n.chains = 2, thin =5, adapt = 1000, burnin = 4000, sample = 3000)
+summaries = PANSresults$summaries
+print(PANSresults)
+```
+
+### 计算pWAIC
+
+```{r}
+N = as.vector(t(matrix(Ni,nrow = 50)))
+beta = beta
+X = X
+trace1 = matrix(unlist(PANSresults$mcmc[1]), nrow = 3000)[,1:2000]
+alpha = trace1[,1:1000]
+sigma2invD = trace1[,1001:2000]
+
+pWAIC <- function(Ni, alpha, sigma2invD, beta, X)
+{
+    result = c()
+    Xb = X%*%beta
+    for(i in 1:1000)
+    {
+        ai = alpha[,i]
+        si = sigma2invD[,i]
+        ni = Ni[i]
+        Xbi = Xb[i]
+        p = c()
+        for(j in 1:3000)
+        {
+            pi = dlnorm(ni,Xbi+ai[j], sqrt(si[j]))
+            p = c(p, pi)
+        }
+        result = c(result,log(mean(p)) - mean(log(p)))
+    }
+    return(2*sum(result))
+}
+
+print(pWAIC(N, alpha, sigma2invD, beta, X))
 ```
 
 
